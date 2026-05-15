@@ -37,6 +37,9 @@ AES = {
     'adabelief':        {'color': '#FFBF46', 'markevery': 10, 'zorder': 6},
     'adabound':         {'color': '#4f9d69', 'markevery': 10, 'zorder': 5},
     'lion':             {'color': '#dbabab', 'markevery': 10, 'zorder': 4},
+    'muon':             {'color': '#00518F', 'markevery': 10, 'zorder': 10},
+    'spectral-clip':    {'color': '#FF6B35', 'markevery': 10, 'zorder': 10},
+    'spectral-inv':     {'color': '#FF7F0E', 'markevery': 10, 'zorder': 10},
     'default':          {'color': 'grey','markevery': 3, 'zorder': 1},
 }
 

@@ -10,6 +10,9 @@ from .adabound import AdaBoundW
 from .adabelief import AdaBelief
 from .lion import Lion
 from .ngn import NGN
+from .muon import Muon
+from .spectral_clip import SpectralClip
+from .spectral_inv import SpectralInv
 
 # only applicable to linear regression
 from .spp import SPP
@@ -45,7 +48,8 @@ def get_optimizer(opt_config: dict) -> Tuple[torch.optim.Optimizer, dict]:
                   'weight_decay': opt_config.get('weight_decay', 0),
                   'momentum': opt_config.get('momentum', 0.9),
                   'nesterov': False,
-                  'dampening': dampening
+                  'dampening': dampening,
+                  'only_train_matrices': opt_config.get('only_train_matrices', False),
                   }
 
     elif name == 'sgd-nesterov':
@@ -70,7 +74,8 @@ def get_optimizer(opt_config: dict) -> Tuple[torch.optim.Optimizer, dict]:
         hyperp = {'lr': opt_config.get('lr', 1e-3),
                   'weight_decay': opt_config.get('weight_decay', 0),
                   'betas': opt_config.get('betas', (0.9, 0.999)),
-                  'eps': opt_config.get('eps', 1e-8)
+                  'eps': opt_config.get('eps', 1e-8),
+                  'only_train_matrices': opt_config.get('only_train_matrices', False),
                   }
     
     elif name == 'momo':
@@ -158,7 +163,42 @@ def get_optimizer(opt_config: dict) -> Tuple[torch.optim.Optimizer, dict]:
         opt_obj = NGN
         hyperp = {'lr': opt_config.get('lr', 1e-3),
                   }
-        
+
+    elif name == 'muon':
+        opt_obj = Muon
+        hyperp = {'lr': opt_config.get('lr', 1e-3),
+                  'muon_lr_scale': opt_config.get('muon_lr_scale', 10),
+                  'weight_decay': opt_config.get('weight_decay', 0.1),
+                  'momentum': opt_config.get('momentum', 0.95),
+                  'ns_steps': opt_config.get('ns_steps', 5),
+                  'betas': opt_config.get('betas', (0.95, 0.95)),
+                  'eps': opt_config.get('eps', 1e-8),
+                  'only_train_matrices': opt_config.get('only_train_matrices', False),
+                  }
+
+    elif name == 'spectral-clip':
+        opt_obj = SpectralClip
+        hyperp = {'lr': opt_config.get('lr', 1e-3),
+                  'spectral_lr_scale': opt_config.get('spectral_lr_scale', 10),
+                  'weight_decay': opt_config.get('weight_decay', 0.1),
+                  'momentum': opt_config.get('momentum', 0.95),
+                  'betas': opt_config.get('betas', (0.95, 0.95)),
+                  'eps': opt_config.get('eps', 1e-8),
+                  'only_train_matrices': opt_config.get('only_train_matrices', False),
+                  }
+
+    elif name == 'spectral-inv':
+        opt_obj = SpectralInv
+        hyperp = {'lr': opt_config.get('lr', 1e-3),
+                  'spectral_lr_scale': opt_config.get('spectral_lr_scale', 1),
+                  'weight_decay': opt_config.get('weight_decay', 0.1),
+                  'momentum': opt_config.get('momentum', 0.95),
+                  'betas': opt_config.get('betas', (0.95, 0.95)),
+                  'eps': opt_config.get('eps', 1e-8),
+                  'target_rms': opt_config.get('target_rms', 0.18),
+                  'only_train_matrices': opt_config.get('only_train_matrices', False),
+                  }
+
     else:
         raise KeyError(f"Unknown optimizer name {name}.")
         

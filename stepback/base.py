@@ -20,14 +20,15 @@ from .defaults import DEFAULTS
 class Base:
     def __init__(
             self,
-            name: str, 
-            config: dict, 
-            device: str=DEFAULTS.device, 
+            name: str,
+            config: dict,
+            device: str=DEFAULTS.device,
             data_dir: str=DEFAULTS.data_dir,
             num_workers: int=DEFAULTS.num_workers,
             data_parallel: Union[list, None]=DEFAULTS.data_parallel,
             log_every_k_steps: Union[int, None]=DEFAULTS.log_every_k_steps,
-            verbose: bool=DEFAULTS.verbose
+            verbose: bool=DEFAULTS.verbose,
+            wandb_run=None
         ):
         """The main class. Performs one single training run plus evaluation.
 
@@ -63,6 +64,7 @@ class Base:
         self.data_parallel = data_parallel
         self.log_every_k_steps = log_every_k_steps
         self.verbose = verbose
+        self.wandb_run = wandb_run
 
         # Device handling
         print("CUDA available? ", torch.cuda.is_available())
@@ -196,10 +198,25 @@ class Base:
     
     def _init_opt(self, opt_obj, hyperp):
         """Initializes the opt object. If your optimizer needs custom commands, add them here."""
-        
-        self.opt = opt_obj(params=self.model.parameters(), **hyperp)         
-        
-        print(self.opt)        
+        from .optim.muon import Muon
+        from .optim.spectral_clip import SpectralClip
+        from .optim.spectral_inv import SpectralInv
+
+        only_train_matrices = hyperp.pop('only_train_matrices', False)
+
+        if opt_obj in (Muon, SpectralClip, SpectralInv):
+            self.opt = opt_obj(named_params=self.model.named_parameters(),
+                               only_train_matrices=only_train_matrices, **hyperp)
+        else:
+            if only_train_matrices:
+                from .optim import EXCLUDED_LAYERS
+                params = [p for n, p in self.model.named_parameters()
+                          if p.ndim >= 2 and not any(ex in n for ex in EXCLUDED_LAYERS)]
+            else:
+                params = self.model.parameters()
+            self.opt = opt_obj(params=params, **hyperp)
+
+        print(self.opt)
         return
     
     def run(self):
@@ -269,7 +286,23 @@ class Base:
 
                 # Add score_dict to score_list
                 score_list += [score_dict]
-            
+
+                # Log to wandb
+                if self.wandb_run is not None:
+                    wandb_log = {
+                        'epoch': epoch,
+                        'train/loss': score_dict.get('train_loss'),
+                        'train/score': score_dict.get('train_score'),
+                        'val/loss': score_dict.get('val_loss'),
+                        'val/score': score_dict.get('val_score'),
+                        'train/epoch_time': score_dict.get('train_epoch_time'),
+                        'model_norm': score_dict.get('model_norm'),
+                        'grad_norm': score_dict.get('grad_norm'),
+                        'learning_rate': score_dict.get('learning_rate'),
+                    }
+                    wandb_log = {k: v for k, v in wandb_log.items() if v is not None}
+                    self.wandb_run.log(wandb_log, step=epoch)
+
             self._epochs_trained += 1
         
         end_time = str(datetime.datetime.now())
