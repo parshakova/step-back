@@ -13,14 +13,10 @@ echo "TASK_FILE: $TASK_FILE"
 mkdir -p slurm_logs
 
 module load disBatch
-module load python
+module load python/3.11.11
+module load cudnn/8.9.7.29-12
 
-# Activate virtual environment if it exists
-if [ -f ".venv/bin/activate" ]; then
-    source .venv/bin/activate
-elif [ -f "venv/bin/activate" ]; then
-    source venv/bin/activate
-fi
+source .venv/bin/activate
 
 echo "Starting disBatch with task file $TASK_FILE..."
 disBatch $TASK_FILE --prefix "disbatch_logs"

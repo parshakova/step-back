@@ -13,22 +13,23 @@ import numpy as np
 from . import EXCLUDED_LAYERS
 
 
-def SVDInv(G: torch.Tensor) -> torch.Tensor:
+def SVDInv(G: torch.Tensor, inv_strategy: str) -> torch.Tensor:
+    """Spectral inversion of a 2D tensor via SVD, keeping the original (m, n) shape."""
     assert G.ndim == 2, "Input tensor must have exactly two dimensions."
 
-    X = G.clone()  # torch doesn't support SVD for bfloat16
-    if G.size(-2) > G.size(-1):
-        X = X.mT
+    norm = G.norm() + 1e-12
+    X = G.clone() / norm
 
     U, S, Vh = torch.linalg.svd(X, full_matrices=False)
-    S_inv = 1.0 / S.clamp(min=1e-12)
-    X = U @ (S_inv[:, None] * Vh)
+    if inv_strategy == "pseudo":
+        tol = torch.finfo(G.dtype).eps
+        S_inv = torch.where(S > tol, 1.0 / S, torch.zeros_like(S))
+    elif inv_strategy == "damp":
+        eps = torch.finfo(G.dtype).eps
+        S_inv = 1.0 / (S + eps)
+    X = U @ (S_inv[:, None] * Vh) / norm
 
-    if G.size(-2) > G.size(-1):
-        X = X.mT
-    X = X.bfloat16()
-
-    return X
+    return X.bfloat16()
 
 
 class SpectralInv(torch.optim.Optimizer):
@@ -60,6 +61,7 @@ class SpectralInv(torch.optim.Optimizer):
                  eps=1e-8,
                  target_rms=0.18,
                  only_train_matrices=False,
+                 inv_strategy="pseudo",
                  ):
 
         defaults = dict(
@@ -72,6 +74,7 @@ class SpectralInv(torch.optim.Optimizer):
 
         self.target_rms = target_rms
         self.spectral_lr_scale = spectral_lr_scale
+        self.inv_strategy = inv_strategy
 
         muon_params = []
         adam_params = []
@@ -118,7 +121,7 @@ class SpectralInv(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g, alpha=1.0 - momentum)
 
                 buf_2d = buf.view(buf.shape[0], -1)
-                u = SVDInv(buf_2d)
+                u = SVDInv(buf_2d, self.inv_strategy)
 
                 # RMS rescale to target_rms
                 rms = u.norm() / np.sqrt(u.numel())

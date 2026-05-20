@@ -2,9 +2,9 @@
 Implements the SpectralClip optimizer.
 
 Uses SVD-based spectral clipping instead of polar factorization for the
-orthogonalization step. Singular values are clamped to a maximum of `lamb`,
-so with lamb=1 this recovers the polar factor (all singular values set to 1),
-and with larger lamb it allows the update to retain magnitude information.
+orthogonalization step. Singular values are clamped to a maximum of `tau`,
+so with tau=1 this recovers the polar factor (all singular values set to 1),
+and with larger tau it allows the update to retain magnitude information.
 
 1D parameters and embeddings are updated with Adam (no bias correction).
 """
@@ -14,21 +14,20 @@ import numpy as np
 from . import EXCLUDED_LAYERS
 
 
-def SVDClip(G: torch.Tensor, lamb: float) -> torch.Tensor:
+def SVDClip(G: torch.Tensor, tau_strategy: str) -> torch.Tensor:
     assert G.ndim == 2, "Input tensor must have exactly two dimensions."
 
     X = G.clone()  # torch doesn't support SVD for bfloat16
-    if G.size(-2) > G.size(-1):
-        X = X.mT
 
     U, S, Vh = torch.linalg.svd(X, full_matrices=False)
-    clipped = torch.clamp(S, max=lamb)
+    if tau_strategy == "one":
+        tau = 1.0
+    elif tau_strategy == "average":
+        tau = S.sum() / min(G.shape[-2], G.shape[-1])
+    clipped = torch.clamp(S, max=tau)
     X = U @ (clipped[:, None] * Vh)
 
-    if G.size(-2) > G.size(-1):
-        X = X.mT
     X = X.bfloat16()
-
     return X
 
 
@@ -38,7 +37,7 @@ class SpectralClip(torch.optim.Optimizer):
 
     Like Muon, this runs EMA momentum on gradients, but replaces the polar
     factorization step with SVD clipping: singular values are clamped to at
-    most `lamb`, preserving partial magnitude information in the update.
+    most `tau`, preserving partial magnitude information in the update.
 
     1D parameters and embeddings are updated with Adam (no bias correction).
 
@@ -54,13 +53,14 @@ class SpectralClip(torch.optim.Optimizer):
     def __init__(self,
                  named_params,
                  lr=1e-3,
-                 spectral_lr_scale=1,#10,
+                 spectral_lr_scale=1,
                  weight_decay=0.1,
                  momentum=0.95,
                  betas=(0.95, 0.95),
                  eps=1e-8,
                  target_rms=0.18,
                  only_train_matrices=False,
+                 tau_strategy="average"
                  ):
 
         defaults = dict(
@@ -71,6 +71,7 @@ class SpectralClip(torch.optim.Optimizer):
             eps=eps,
         )
         self.target_rms = target_rms
+        self.tau_strategy = tau_strategy
         self.spectral_lr_scale = spectral_lr_scale
 
         muon_params = []
@@ -118,15 +119,14 @@ class SpectralClip(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g, alpha=1.0 - momentum)
 
                 buf_2d = buf.view(buf.shape[0], -1)
-                rms_scale = self.target_rms * np.sqrt(max(buf_2d.shape[-2], buf_2d.shape[-1]))
-                lamb = lr * self.spectral_lr_scale * rms_scale
+                u = SVDClip(buf_2d, self.tau_strategy).view(buf.shape)
 
-                u = SVDClip(buf_2d, lamb).view(buf.shape)
-                # rms = u.norm() / np.sqrt(u.numel())
-                # rms_scale = self.target_rms / rms.clamp(min=1e-12)
+                # RMS rescale to target_rms
+                rms = u.norm() / np.sqrt(u.numel())
+                rms_scale = self.target_rms / rms.clamp(min=1e-12)
 
                 p.data.mul_(1 - lr * weight_decay)
-                p.data.add_(u, alpha=-1)
+                p.data.add_(u, alpha=-lr * self.spectral_lr_scale * rms_scale)
 
             ############################
             #       Adam backup        #

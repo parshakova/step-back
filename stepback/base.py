@@ -199,12 +199,13 @@ class Base:
     def _init_opt(self, opt_obj, hyperp):
         """Initializes the opt object. If your optimizer needs custom commands, add them here."""
         from .optim.muon import Muon
+        from .optim.muon_bot_p import MuonBottomP
         from .optim.spectral_clip import SpectralClip
         from .optim.spectral_inv import SpectralInv
 
         only_train_matrices = hyperp.pop('only_train_matrices', False)
 
-        if opt_obj in (Muon, SpectralClip, SpectralInv):
+        if opt_obj in (Muon, MuonBottomP, SpectralClip, SpectralInv):
             self.opt = opt_obj(named_params=self.model.named_parameters(),
                                only_train_matrices=only_train_matrices, **hyperp)
         else:

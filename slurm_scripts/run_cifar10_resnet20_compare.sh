@@ -34,7 +34,7 @@ export TASK_FILE
 
 sbatch \
     --partition=gpu \
-    --ntasks=15 \
+    --ntasks=16 \
     --cpus-per-task=4 \
     --gpus-per-task=1 \
     --mem-per-gpu=8G \

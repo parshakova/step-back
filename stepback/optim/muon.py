@@ -35,12 +35,13 @@ class Muon(torch.optim.Optimizer):
     def __init__(self,
                  named_params,
                  lr=1e-3,
-                 muon_lr_scale=1, #10,
+                 muon_lr_scale=1, 
                  weight_decay=0.1,
                  momentum=0.95,
                  ns_steps=5,
                  betas=(0.95, 0.95),
                  eps=1e-8,
+                 target_rms=0.18,
                  only_train_matrices=False,
                  ):
 
@@ -54,6 +55,7 @@ class Muon(torch.optim.Optimizer):
 
         self.muon_lr_scale = muon_lr_scale
         self.ns_steps = ns_steps
+        self.target_rms = target_rms
 
         muon_params = []
         adam_params = []
@@ -101,7 +103,7 @@ class Muon(torch.optim.Optimizer):
 
                 buf_2d = buf.view(buf.shape[0], -1)
                 u = PolarExpress(buf_2d, self.ns_steps).view(buf.shape)
-                rms_scale = 0.18 * np.sqrt(max(buf_2d.shape[-2], buf_2d.shape[-1]))
+                rms_scale = self.target_rms * np.sqrt(max(buf_2d.shape[-2], buf_2d.shape[-1]))
                 p.data.mul_(1 - lr * weight_decay)
                 p.data.add_(u, alpha=-lr * self.muon_lr_scale * rms_scale)
 
