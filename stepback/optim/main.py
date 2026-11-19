@@ -190,12 +190,16 @@ def get_optimizer(opt_config: dict) -> Tuple[torch.optim.Optimizer, dict]:
                   'bottom_p': opt_config.get('bottom_p', default_p),
                   }
 
-    elif name in ('spectral-clip', 'spectral-clip-avg', 'spectral-clip-1'):
+    elif name in ('spectral-clip', 'spectral-clip-avg', 'spectral-clip-1', 'spectral-clip-ns'):
         opt_obj = SpectralClip
         if name == 'spectral-clip-1':
             default_tau = 'one'
         else:
             default_tau = 'average'
+        if name == 'spectral-clip-ns':
+            default_strategy = 'ns'
+        else:
+            default_strategy = 'svd'
         hyperp = {'lr': opt_config.get('lr', 1e-3),
                   'spectral_lr_scale': opt_config.get('spectral_lr_scale', 10),
                   'weight_decay': opt_config.get('weight_decay', 0.1),
@@ -203,15 +207,22 @@ def get_optimizer(opt_config: dict) -> Tuple[torch.optim.Optimizer, dict]:
                   'betas': opt_config.get('betas', (0.95, 0.95)),
                   'eps': opt_config.get('eps', 1e-8),
                   'only_train_matrices': opt_config.get('only_train_matrices', False),
+                  'strategy': opt_config.get('strategy', default_strategy),
                   'tau_strategy': opt_config.get('tau_strategy', default_tau),
+                  'clip_c': opt_config.get('clip_c', 1.0),
+                  'ns_iter': opt_config.get('ns_iter', 10),
                   }
 
-    elif name in ('spectral-inv', 'spectral-inv-pseudo', 'spectral-inv-damp'):
+    elif name in ('spectral-inv', 'spectral-inv-pseudo', 'spectral-inv-damp', 'spectral-inv-shift-35'):
         opt_obj = SpectralInv
         if name == 'spectral-inv-damp':
             default_inv = 'damp'
         else:
             default_inv = 'pseudo'
+        if name == 'spectral-inv-shift-35':
+            default_strategy = 'shifted'
+        else:
+            default_strategy = 'svd'
         hyperp = {'lr': opt_config.get('lr', 1e-3),
                   'spectral_lr_scale': opt_config.get('spectral_lr_scale', 1),
                   'weight_decay': opt_config.get('weight_decay', 0.1),
@@ -220,7 +231,11 @@ def get_optimizer(opt_config: dict) -> Tuple[torch.optim.Optimizer, dict]:
                   'eps': opt_config.get('eps', 1e-8),
                   'target_rms': opt_config.get('target_rms', 0.18),
                   'only_train_matrices': opt_config.get('only_train_matrices', False),
+                  'strategy': opt_config.get('strategy', default_strategy),
                   'inv_strategy': opt_config.get('inv_strategy', default_inv),
+                  'inv_eps': opt_config.get('inv_eps', 1e-4 if name == 'spectral-inv-shift-35' else 1e-6),
+                  'polar_steps': opt_config.get('polar_steps', 15 if name == 'spectral-inv-shift-35' else 5),
+                  'ns_inv_iters': opt_config.get('ns_inv_iters', 20 if name == 'spectral-inv-shift-35' else 10),
                   }
 
     else:

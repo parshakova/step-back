@@ -1,10 +1,9 @@
 """
 Implements the SpectralClip optimizer.
 
-Uses SVD-based spectral clipping instead of polar factorization for the
-orthogonalization step. Singular values are clamped to a maximum of `tau`,
-so with tau=1 this recovers the polar factor (all singular values set to 1),
-and with larger tau it allows the update to retain magnitude information.
+A single optimizer class that supports multiple spectral clipping strategies:
+  - "svd": Hard clamp via explicit SVD, sigma -> min(sigma, tau).
+  - "ns":  Soft clip via Newton-Schulz, sigma -> sigma / sqrt(1 + sigma^2 / c^2).
 
 1D parameters and embeddings are updated with Adam (no bias correction).
 """
@@ -12,32 +11,15 @@ import torch
 import numpy as np
 
 from . import EXCLUDED_LAYERS
-
-
-def SVDClip(G: torch.Tensor, tau_strategy: str) -> torch.Tensor:
-    assert G.ndim == 2, "Input tensor must have exactly two dimensions."
-
-    X = G.clone()  # torch doesn't support SVD for bfloat16
-
-    U, S, Vh = torch.linalg.svd(X, full_matrices=False)
-    if tau_strategy == "one":
-        tau = 1.0
-    elif tau_strategy == "average":
-        tau = S.sum() / min(G.shape[-2], G.shape[-1])
-    clipped = torch.clamp(S, max=tau)
-    X = U @ (clipped[:, None] * Vh)
-
-    X = X.bfloat16()
-    return X
+from .spectral_clip_func import clip_sigvals
 
 
 class SpectralClip(torch.optim.Optimizer):
     """
-    SpectralClip - Gradient update with SVD-based spectral clipping.
+    SpectralClip - Gradient update with spectral clipping.
 
-    Like Muon, this runs EMA momentum on gradients, but replaces the polar
-    factorization step with SVD clipping: singular values are clamped to at
-    most `tau`, preserving partial magnitude information in the update.
+    Runs EMA momentum on gradients, applies a spectral clipping transform
+    (large singular values are capped), and RMS-rescales the update.
 
     1D parameters and embeddings are updated with Adam (no bias correction).
 
@@ -49,6 +31,15 @@ class SpectralClip(torch.optim.Optimizer):
         momentum: The momentum used for gradient EMA accumulation. (0.95 is a good default)
         betas: (beta1, beta2) for Adam on 1D params.
         eps: Epsilon for Adam on 1D params.
+        target_rms: Target RMS for the update matrix. (0.18 is the default)
+        strategy: Spectral clipping strategy.
+            "svd": Hard clamp via explicit SVD.
+            "ns": Soft clip via Newton-Schulz iterations.
+        tau_strategy: How to set the clipping threshold.
+            "one": Fixed threshold (tau=1 for SVD, clip_c for NS).
+            "average": Data-dependent (mean singular value for SVD, Frobenius est. for NS).
+        clip_c: Base clipping threshold (for strategy="ns" with tau_strategy="one").
+        ns_iter: Number of Newton-Schulz iterations (for strategy="ns").
     """
     def __init__(self,
                  named_params,
@@ -60,7 +51,10 @@ class SpectralClip(torch.optim.Optimizer):
                  eps=1e-8,
                  target_rms=0.18,
                  only_train_matrices=False,
-                 tau_strategy="average"
+                 strategy="svd",
+                 tau_strategy="average",
+                 clip_c=1.0,
+                 ns_iter=10,
                  ):
 
         defaults = dict(
@@ -71,8 +65,11 @@ class SpectralClip(torch.optim.Optimizer):
             eps=eps,
         )
         self.target_rms = target_rms
-        self.tau_strategy = tau_strategy
         self.spectral_lr_scale = spectral_lr_scale
+        self.strategy = strategy
+        self.tau_strategy = tau_strategy
+        self.clip_c = clip_c
+        self.ns_iter = ns_iter
 
         muon_params = []
         adam_params = []
@@ -119,7 +116,13 @@ class SpectralClip(torch.optim.Optimizer):
                 buf.mul_(momentum).add_(g, alpha=1.0 - momentum)
 
                 buf_2d = buf.view(buf.shape[0], -1)
-                u = SVDClip(buf_2d, self.tau_strategy).view(buf.shape)
+                u = clip_sigvals(
+                    buf_2d,
+                    strategy=self.strategy,
+                    tau_strategy=self.tau_strategy,
+                    clip_c=self.clip_c,
+                    ns_iter=self.ns_iter,
+                ).view(buf.shape)
 
                 # RMS rescale to target_rms
                 rms = u.norm() / np.sqrt(u.numel())
